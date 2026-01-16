@@ -17,15 +17,13 @@ type Handlers struct {
 }
 
 func NewHandlers(store storage.Store) *Handlers {
-	// Initialize use cases
 	saveUC := saveUseCase.NewUseCase(store)
 	retrieveUC := retrieveUseCase.NewUseCase(store)
 	deleteUC := deleteUseCase.NewUseCase(store)
 
-	// Initialize handlers
 	return &Handlers{
-		Save:     save.NewHandler(saveUC),
-		Retrieve: retrieve.NewHandler(retrieveUC),
-		Delete:   delete.NewHandler(deleteUC),
+		Save:     save.New(saveUC),
+		Retrieve: retrieve.New(retrieveUC),
+		Delete:   delete.New(deleteUC),
 	}
 }

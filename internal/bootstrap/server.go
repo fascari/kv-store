@@ -3,19 +3,23 @@ package bootstrap
 import (
 	"fmt"
 	"net/http"
+	"time"
 
 	"github.com/felipeascari/kv-store/pkg/config"
+	"github.com/felipeascari/kv-store/pkg/lock"
 	"github.com/felipeascari/kv-store/pkg/logger"
 	"github.com/felipeascari/kv-store/pkg/storage"
 	"github.com/go-chi/chi/v5"
+	"github.com/redis/go-redis/v9"
 	"go.uber.org/zap"
 )
 
 type Server struct {
-	router  *chi.Mux
-	addr    string
-	logger  *zap.Logger
-	storage storage.Store
+	router      *chi.Mux
+	addr        string
+	logger      *zap.Logger
+	store       storage.Store
+	redisClient *redis.Client
 }
 
 func NewServer() (*Server, error) {
@@ -28,33 +32,48 @@ func NewServer() (*Server, error) {
 		return nil, fmt.Errorf("failed to load config: %w", err)
 	}
 
-	kvStorage, err := createStorage(cfg.Storage)
+	kvStore, redisClient, err := createStorage(cfg.Storage)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create storage: %w", err)
 	}
 
-	router := setupRouter(kvStorage)
+	router := setupRouter(kvStore)
 
 	addr := fmt.Sprintf(":%s", cfg.Server.Port)
 
 	logger.Logger().Info("initialized storage", zap.String("type", cfg.Storage.Type.String()))
 
 	return &Server{
-		router:  router,
-		addr:    addr,
-		logger:  logger.Logger(),
-		storage: kvStorage,
+		router:      router,
+		addr:        addr,
+		logger:      logger.Logger(),
+		store:       kvStore,
+		redisClient: redisClient,
 	}, nil
 }
 
-func createStorage(cfg config.StorageConfig) (storage.Store, error) {
+func createStorage(cfg config.StorageConfig) (storage.Store, *redis.Client, error) {
 	switch cfg.Type {
 	case storage.TypeRedis:
-		return storage.NewRedis(cfg.Redis.Addr, cfg.Redis.Password, cfg.Redis.DB)
+		redisStore, err := storage.NewRedis(cfg.Redis.Addr, cfg.Redis.Password, cfg.Redis.DB)
+		if err != nil {
+			return nil, nil, err
+		}
+
+		// Wrap Redis store with distributed locking (fencing tokens)
+		// This prevents zombie processes and ensures consistency
+		lockMgr := lock.NewManager(
+			lock.NewRedisLock(redisStore.Client(), 5*time.Second),
+		)
+		lockedStore := storage.NewLockedStore(redisStore, lockMgr)
+
+		return lockedStore, redisStore.Client(), nil
+
 	case storage.TypeMemory:
-		return storage.NewMemory(), nil
+		return storage.NewMemory(), nil, nil
+
 	default:
-		return nil, fmt.Errorf("unknown storage type: %s", cfg.Type)
+		return nil, nil, fmt.Errorf("unknown storage type: %s", cfg.Type)
 	}
 }
 
@@ -70,8 +89,8 @@ func (s *Server) Address() string {
 func (s *Server) Shutdown() {
 	s.logger.Info("shutting down server")
 
-	if redis, ok := s.storage.(*storage.Redis); ok {
-		if err := redis.Close(); err != nil {
+	if s.redisClient != nil {
+		if err := s.redisClient.Close(); err != nil {
 			s.logger.Error("failed to close Redis connection", zap.Error(err))
 		}
 	}
