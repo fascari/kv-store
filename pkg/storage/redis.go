@@ -34,20 +34,20 @@ func NewRedis(addr, password string, db int) (*Redis, error) {
 	}, nil
 }
 
-func (s *Redis) Save(key string, value any) error {
+func (r *Redis) Save(key string, value any) error {
 	data, err := json.Marshal(value)
 	if err != nil {
 		return err
 	}
-	return s.client.Set(s.ctx, key, data, 0).Err()
+	return r.client.Set(r.ctx, key, data, 0).Err()
 }
 
-func (s *Redis) Retrieve(key string) (any, error) {
-	data, err := s.client.Get(s.ctx, key).Bytes()
-	if errors.Is(err, redis.Nil) {
-		return nil, ErrKeyNotFound
-	}
+func (r *Redis) Retrieve(key string) (any, error) {
+	data, err := r.client.Get(r.ctx, key).Bytes()
 	if err != nil {
+		if errors.Is(err, redis.Nil) {
+			return nil, ErrKeyNotFound
+		}
 		return nil, err
 	}
 
@@ -59,8 +59,8 @@ func (s *Redis) Retrieve(key string) (any, error) {
 	return value, nil
 }
 
-func (s *Redis) Delete(key string) error {
-	result, err := s.client.Del(s.ctx, key).Result()
+func (r *Redis) Delete(key string) error {
+	result, err := r.client.Del(r.ctx, key).Result()
 	if err != nil {
 		return err
 	}
@@ -72,12 +72,16 @@ func (s *Redis) Delete(key string) error {
 	return nil
 }
 
-func (s *Redis) Close() error {
-	return s.client.Close()
+func (r *Redis) Close() error {
+	return r.client.Close()
 }
 
-func (s *Redis) Ping(timeout time.Duration) error {
-	ctx, cancel := context.WithTimeout(s.ctx, timeout)
+func (r *Redis) Client() *redis.Client {
+	return r.client
+}
+
+func (r *Redis) Ping(timeout time.Duration) error {
+	ctx, cancel := context.WithTimeout(r.ctx, timeout)
 	defer cancel()
-	return s.client.Ping(ctx).Err()
+	return r.client.Ping(ctx).Err()
 }

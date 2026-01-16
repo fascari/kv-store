@@ -1,35 +1,30 @@
 package storage
 
-import (
-	"errors"
-	"sync"
-)
-
-var ErrKeyNotFound = errors.New("key not found")
+import "sync"
 
 type Memory struct {
-	mu      sync.RWMutex
-	storage MemoryStorage
+	mu    sync.RWMutex
+	store map[string]any
 }
 
 func NewMemory() *Memory {
 	return &Memory{
-		storage: NewMemoryStorage(),
+		store: make(map[string]any),
 	}
 }
 
-func (s *Memory) Save(key string, value any) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.storage.Set(key, value)
+func (m *Memory) Save(key string, value any) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.store[key] = value
 	return nil
 }
 
-func (s *Memory) Retrieve(key string) (any, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
+func (m *Memory) Retrieve(key string) (any, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
 
-	value, exists := s.storage.Get(key)
+	value, exists := m.store[key]
 	if !exists {
 		return nil, ErrKeyNotFound
 	}
@@ -37,14 +32,14 @@ func (s *Memory) Retrieve(key string) (any, error) {
 	return value, nil
 }
 
-func (s *Memory) Delete(key string) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+func (m *Memory) Delete(key string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 
-	if _, exists := s.storage.Get(key); !exists {
+	if _, exists := m.store[key]; !exists {
 		return ErrKeyNotFound
 	}
 
-	s.storage.Delete(key)
+	delete(m.store, key)
 	return nil
 }
