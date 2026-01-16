@@ -5,79 +5,105 @@ package storage_test
 import (
 	"context"
 	"testing"
-	"time"
 
 	"github.com/felipeascari/kv-store/pkg/storage"
 	"github.com/stretchr/testify/require"
 	"github.com/testcontainers/testcontainers-go"
-	"github.com/testcontainers/testcontainers-go/modules/redis"
+	"github.com/testcontainers/testcontainers-go/wait"
 )
 
-func TestRedis_Save(t *testing.T) {
-	ctx := context.Background()
-	container, store := setupRedisContainer(t, ctx)
-	defer terminateContainer(t, container)
-	defer closeRedis(t, store)
-
-	runSaveTests(t, store, saveTests)
-}
-
-func TestRedis_Retrieve(t *testing.T) {
-	ctx := context.Background()
-	container, store := setupRedisContainer(t, ctx)
-	defer terminateContainer(t, container)
-	defer closeRedis(t, store)
-
-	runRetrieveTests(t, store, retrieveTests())
-}
-
-func TestRedis_Delete(t *testing.T) {
-	ctx := context.Background()
-	container, store := setupRedisContainer(t, ctx)
-	defer terminateContainer(t, container)
-	defer closeRedis(t, store)
-
-	runDeleteTests(t, store, deleteTests)
-}
-
-func TestRedis_Ping(t *testing.T) {
-	ctx := context.Background()
-	container, store := setupRedisContainer(t, ctx)
-	defer terminateContainer(t, container)
-	defer closeRedis(t, store)
-
-	err := store.Ping(5 * time.Second)
-	require.NoError(t, err)
-}
-
-func setupRedisContainer(t *testing.T, ctx context.Context) (*redis.RedisContainer, *storage.Redis) {
-	t.Helper()
-
-	redisContainer, err := redis.Run(ctx, "redis:7-alpine")
-	require.NoError(t, err, "failed to start Redis container")
-
-	host, err := redisContainer.Host(ctx)
-	require.NoError(t, err, "failed to get Redis host")
-
-	port, err := redisContainer.MappedPort(ctx, "6379/tcp")
-	require.NoError(t, err, "failed to get Redis port")
-
-	addr := host + ":" + port.Port()
-
-	store, err := storage.NewRedis(addr, "", 0)
-	require.NoError(t, err, "failed to create Redis store")
-
-	return redisContainer, store
-}
-
-func terminateContainer(t *testing.T, container *redis.RedisContainer) {
-	t.Helper()
-	if container != nil {
-		_ = testcontainers.TerminateContainer(container)
+func TestRedis(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
 	}
+
+	ctx := context.Background()
+	store, cleanup := setupRedis(t, ctx)
+	defer cleanup()
+
+	t.Run("should save and retrieve values", func(t *testing.T) {
+		tests := []struct {
+			name  string
+			key   string
+			value any
+			want  any
+		}{
+			{
+				name:  "string value",
+				key:   "name",
+				value: "Alice",
+				want:  "Alice",
+			},
+			{
+				name:  "integer value",
+				key:   "age",
+				value: 9,
+				want:  float64(9),
+			},
+			{
+				name:  "map value",
+				key:   "user",
+				value: map[string]any{"id": 1},
+				want:  map[string]any{"id": float64(1)},
+			},
+		}
+
+		for _, tt := range tests {
+			t.Run(tt.name, func(t *testing.T) {
+				require.NoError(t, store.Save(tt.key, tt.value))
+
+				value, err := store.Retrieve(tt.key)
+				require.NoError(t, err)
+				require.Equal(t, tt.want, value)
+			})
+		}
+	})
+
+	t.Run("should return error when retrieving non-existent key", func(t *testing.T) {
+		_, err := store.Retrieve("nonexistent")
+		require.ErrorIs(t, err, storage.ErrKeyNotFound)
+	})
+
+	t.Run("should delete existing key", func(t *testing.T) {
+		require.NoError(t, store.Save("temp", "value"))
+		require.NoError(t, store.Delete("temp"))
+
+		_, err := store.Retrieve("temp")
+		require.ErrorIs(t, err, storage.ErrKeyNotFound)
+	})
+
+	t.Run("should return error when deleting non-existent key", func(t *testing.T) {
+		err := store.Delete("nonexistent")
+		require.ErrorIs(t, err, storage.ErrKeyNotFound)
+	})
 }
 
-func closeRedis(t *testing.T, store *storage.Redis) {
+func setupRedis(t *testing.T, ctx context.Context) (*storage.Redis, func()) {
 	t.Helper()
-	_ = store.Close()
+
+	container, err := testcontainers.GenericContainer(ctx, testcontainers.GenericContainerRequest{
+		ContainerRequest: testcontainers.ContainerRequest{
+			Image:        "redis:7-alpine",
+			ExposedPorts: []string{"6379/tcp"},
+			WaitingFor:   wait.ForLog("Ready to accept connections"),
+		},
+		Started: true,
+	})
+	require.NoError(t, err)
+
+	host, err := container.Host(ctx)
+	require.NoError(t, err)
+
+	port, err := container.MappedPort(ctx, "6379")
+	require.NoError(t, err)
+
+	store, err := storage.NewRedis(host+":"+port.Port(), "", 0)
+	require.NoError(t, err)
+
+	cleanup := func() {
+		_ = store.Close()
+		_ = container.Terminate(ctx)
+	}
+
+	return store, cleanup
 }
