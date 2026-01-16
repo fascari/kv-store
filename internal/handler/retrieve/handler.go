@@ -14,7 +14,7 @@ type Handler struct {
 	useCase retrieve.UseCase
 }
 
-func NewHandler(useCase retrieve.UseCase) *Handler {
+func New(useCase retrieve.UseCase) *Handler {
 	return &Handler{
 		useCase: useCase,
 	}

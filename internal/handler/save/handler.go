@@ -12,7 +12,7 @@ type Handler struct {
 	useCase save.UseCase
 }
 
-func NewHandler(useCase save.UseCase) *Handler {
+func New(useCase save.UseCase) *Handler {
 	return &Handler{
 		useCase: useCase,
 	}
