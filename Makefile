@@ -1,57 +1,45 @@
 .DEFAULT_GOAL := help
 
 help:
-	@echo "KV-STORE - MAKEFILE"
+	@echo "KV-Store"
 	@echo ""
 	@echo "Available commands:"
-	@echo " run              Run the application (Redis storage - default)"
-	@echo " run-memory       Run the application (in-memory storage)"
-	@echo " build            Build the application binary"
-	@echo " test             Run unit tests"
-	@echo " test-integration Run integration tests (requires Docker)"
-	@echo " test-all         Run all tests (unit + integration)"
-	@echo " lint             Run linter"
-	@echo " docker-up        Start Redis using Docker Compose"
-	@echo " docker-down      Stop Redis"
+	@echo "  run                Run application with Redis"
+	@echo "  run-memory         Run application with in-memory storage"
+	@echo "  test               Run all tests (unit + integration)"
+	@echo "  test-unit          Run unit tests only"
+	@echo "  test-integration   Run integration tests only"
+	@echo "  lint               Run linter"
 	@echo ""
 
 run:
-	@echo "Starting application with Redis storage..."
+	@echo "Starting application..."
+	@echo "Stopping any process on port 8080..."
+	@lsof -ti:8080 | xargs kill -9 2>/dev/null || true
+	@docker-compose down 2>/dev/null || true
 	@docker-compose up -d
 	@sleep 2
 	STORAGE_TYPE=redis go run cmd/api/main.go
 
 run-memory:
-	@echo "Starting application with in-memory storage..."
+	@echo "Starting application (in-memory)..."
 	STORAGE_TYPE=memory go run cmd/api/main.go
 
-build:
-	@echo "Building application..."
-	go build -o bin/server cmd/api/main.go
-	@echo "Binary created at bin/server"
-
 test:
+	@echo "Running all tests..."
+	@go test ./... -short
+	@go test -tags=integration ./... -v
+
+test-unit:
 	@echo "Running unit tests..."
-	go test ./...
+	@go test ./... -short
 
 test-integration:
-	@echo "Running integration tests (requires Docker)..."
-	go test -tags=integration ./...
-
-test-all:
-	@echo "Running all tests (unit + integration)..."
-	go test ./...
-	go test -tags=integration ./...
+	@echo "Running integration tests..."
+	@go test -tags=integration ./... -v
 
 lint:
 	@echo "Running linter..."
-	golangci-lint run ./...
+	@golangci-lint run ./...
 
-docker-up:
-	@echo "Starting Redis..."
-	docker-compose up -d
-	@echo "Redis is running on localhost:6379"
-
-docker-down:
-	@echo "Stopping Redis..."
-	docker-compose down
+.PHONY: help run run-memory test test-unit test-integration lint
